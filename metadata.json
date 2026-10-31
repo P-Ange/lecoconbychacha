@@ -1,0 +1,8 @@
+{
+  "name": "Le Cocon Sensoriel by Chacha",
+  "description": "Espace privatif dédié à la coiffure privée, au Head Spa Japonais et aux rituels sensoriels de bien-être à Dampierre-sur-Salon.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

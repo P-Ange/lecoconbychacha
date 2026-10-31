@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-cream: #FAF6F0;
+    --color-sand: #F3ECE1;
+    --color-champagne: #EFE6D8;
+    --color-powder: #E8D8C8;
+    --color-gold: #9E8256;
+    --color-gold-light: #B5986B;
+    --color-gold-hover: #8A6F44;
+    --color-dark: #2C2523;
+    --color-muted: #5A4E46;
+  }
+
+  body {
+    background-color: #FAF6F0;
+    color: #2C2523;
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  h1, h2, h3, h4, .font-serif-title {
+    font-family: 'Cormorant Garamond', 'Playfair Display', serif;
+  }
+
+  .font-cursive {
+    font-family: 'Alex Brush', 'Great Vibes', cursive;
+  }
+}
+
+/* Custom aesthetic glow and card effects */
+.luxury-shadow {
+  box-shadow: 0 15px 35px -5px rgba(158, 130, 86, 0.12), 0 5px 15px rgba(44, 37, 35, 0.04);
+}
+
+.luxury-card-hover {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.luxury-card-hover:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 25px 45px -8px rgba(158, 130, 86, 0.2), 0 8px 20px rgba(44, 37, 35, 0.05);
+}
+
+/* Melted gradient / feathered image blending into the background */
+.image-melt-hero {
+  mask-image: radial-gradient(ellipse 95% 92% at 55% 50%, black 65%, rgba(0,0,0,0.5) 85%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 95% 92% at 55% 50%, black 65%, rgba(0,0,0,0.5) 85%, transparent 100%);
+}
+
+.image-melt-left {
+  mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 6%, black 22%, black 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 6%, black 22%, black 100%);
+}
+
+.image-melt-card-horizontal {
+  mask-image: linear-gradient(to right, black 0%, black 72%, rgba(0,0,0,0.4) 90%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 0%, black 72%, rgba(0,0,0,0.4) 90%, transparent 100%);
+}
+
+.image-melt-edges {
+  mask-image: radial-gradient(ellipse 92% 92% at 50% 50%, black 75%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 92% 92% at 50% 50%, black 75%, transparent 100%);
+}
+
+.image-melt-arch {
+  mask-image: linear-gradient(to bottom, black 0%, black 82%, rgba(0,0,0,0.3) 94%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 0%, black 82%, rgba(0,0,0,0.3) 94%, transparent 100%);
+}
+
+/* Subtle gold shimmer */
+.gold-shimmer {
+  background: linear-gradient(135deg, #9E8256 0%, #C4A97D 50%, #8E7348 100%);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(135deg, #9E8256 0%, #C4A97D 50%, #8E7348 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
