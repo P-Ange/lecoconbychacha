@@ -235,22 +235,47 @@ export function getStoredPhotos(): Record<string, string> {
 }
 
 /**
- * Saves photo map to storage and dispatches event
+ * Saves photo to localStorage AND writes the image file directly to server disk (/public/uploads/)
  */
-export function savePhoto(key: string, urlOrBase64: string): void {
-  if (typeof window === 'undefined') return;
+export async function savePhoto(key: string, urlOrBase64: string): Promise<string> {
+  if (typeof window === 'undefined') return urlOrBase64;
+
+  // Immediate optimistic update
   const current = getStoredPhotos();
   current[key] = urlOrBase64;
   try {
     localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(current));
     window.dispatchEvent(new CustomEvent(EVENT_NAME));
   } catch (err) {
-    console.warn("Storage write notice:", err);
+    console.warn('Storage write notice:', err);
   }
+
+  // Persist image file to server disk (/public/uploads/) & /public/data/site-data.json
+  try {
+    const res = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, imageData: urlOrBase64 }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.url) {
+        const latest = getStoredPhotos();
+        latest[key] = json.url;
+        localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(latest));
+        window.dispatchEvent(new CustomEvent(EVENT_NAME));
+        return json.url;
+      }
+    }
+  } catch (err) {
+    console.warn('Disk image persistence notice:', err);
+  }
+
+  return urlOrBase64;
 }
 
 /**
- * Resets a single photo to default
+ * Resets a single photo to default both locally and on server disk
  */
 export function resetPhoto(key: string): void {
   if (typeof window === 'undefined') return;
@@ -263,11 +288,16 @@ export function resetPhoto(key: string): void {
     } catch {
       // fallback
     }
+    fetch('/api/reset-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'photos', key }),
+    }).catch(() => {});
   }
 }
 
 /**
- * Resets all photos to factory defaults
+ * Resets all photos to factory defaults both locally and on server disk
  */
 export function resetAllPhotos(): void {
   if (typeof window === 'undefined') return;
@@ -277,6 +307,11 @@ export function resetAllPhotos(): void {
   } catch {
     // ignore
   }
+  fetch('/api/reset-data', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section: 'photos' }),
+  }).catch(() => {});
 }
 
 /**
@@ -301,7 +336,7 @@ export function getStoredNoveltyOffer(): NoveltyOfferData {
 }
 
 /**
- * Updates novelty offer data
+ * Updates novelty offer data and persists to /public/data/site-data.json on disk
  */
 export function saveNoveltyOffer(data: Partial<NoveltyOfferData>): void {
   if (typeof window === 'undefined') return;
@@ -314,12 +349,27 @@ export function saveNoveltyOffer(data: Partial<NoveltyOfferData>): void {
     localStorage.setItem(STORAGE_KEYS.NOVELTY, JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent(EVENT_NAME));
   } catch (err) {
-    console.warn("Novelty storage write notice:", err);
+    console.warn('Novelty storage write notice:', err);
   }
+
+  fetch('/api/site-data', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ novelty: updated }),
+  })
+    .then((r) => r.json())
+    .then((res) => {
+      if (res?.data?.novelty?.photo && res.data.novelty.photo !== updated.photo) {
+        const withDiskUrl = { ...updated, photo: res.data.novelty.photo };
+        localStorage.setItem(STORAGE_KEYS.NOVELTY, JSON.stringify(withDiskUrl));
+        window.dispatchEvent(new CustomEvent(EVENT_NAME));
+      }
+    })
+    .catch(() => {});
 }
 
 /**
- * Resets novelty offer to factory default
+ * Resets novelty offer to factory default both locally and on server disk
  */
 export function resetNoveltyOffer(): void {
   if (typeof window === 'undefined') return;
@@ -328,6 +378,177 @@ export function resetNoveltyOffer(): void {
     window.dispatchEvent(new CustomEvent(EVENT_NAME));
   } catch {
     // ignore
+  }
+  fetch('/api/reset-data', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ section: 'novelty' }),
+  }).catch(() => {});
+}
+
+/**
+ * Deep clone helper for default prestations
+ */
+function cloneDefaultPrestations(): Record<string, PrestationItem[]> {
+  return JSON.parse(JSON.stringify(DEFAULT_PRESTATIONS));
+}
+
+/**
+ * Reads customized prestations catalog from storage
+ */
+export function getStoredPrestations(): Record<string, PrestationItem[]> {
+  if (typeof window === 'undefined') return cloneDefaultPrestations();
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PRESTATIONS);
+    if (!raw) return cloneDefaultPrestations();
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return cloneDefaultPrestations();
+
+    // Ensure every default category exists in the returned object
+    const merged: Record<string, PrestationItem[]> = cloneDefaultPrestations();
+    for (const key of Object.keys(parsed)) {
+      if (Array.isArray(parsed[key])) {
+        merged[key] = parsed[key];
+      }
+    }
+    return merged;
+  } catch {
+    return cloneDefaultPrestations();
+  }
+}
+
+/**
+ * Saves entire prestations map to storage AND writes to /public/data/site-data.json on disk
+ */
+export function savePrestations(data: Record<string, PrestationItem[]>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.PRESTATIONS, JSON.stringify(data));
+    window.dispatchEvent(new CustomEvent(EVENT_NAME));
+  } catch (err) {
+    console.warn('Prestations storage write notice:', err);
+  }
+
+  fetch('/api/site-data', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prestations: data }),
+  }).catch(() => {});
+}
+
+/**
+ * Adds a new prestation item to a category
+ */
+export function addPrestationItem(categoryKey: string, item: Omit<PrestationItem, 'id'> & { id?: string }): PrestationItem {
+  const all = getStoredPrestations();
+  const list = all[categoryKey] ? [...all[categoryKey]] : [];
+  const newItem: PrestationItem = {
+    ...item,
+    id: item.id || `prest-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  };
+  list.unshift(newItem);
+  all[categoryKey] = list;
+  savePrestations(all);
+  return newItem;
+}
+
+/**
+ * Updates an existing prestation item in a category
+ */
+export function updatePrestationItem(categoryKey: string, itemId: string, updatedFields: Partial<PrestationItem>): void {
+  const all = getStoredPrestations();
+  const list = all[categoryKey] ? [...all[categoryKey]] : [];
+  all[categoryKey] = list.map((item) => (item.id === itemId ? { ...item, ...updatedFields, id: itemId } : item));
+  savePrestations(all);
+}
+
+/**
+ * Deletes a prestation item from a category
+ */
+export function deletePrestationItem(categoryKey: string, itemId: string): void {
+  const all = getStoredPrestations();
+  const list = all[categoryKey] ? [...all[categoryKey]] : [];
+  all[categoryKey] = list.filter((item) => item.id !== itemId);
+  savePrestations(all);
+}
+
+/**
+ * Reorders a prestation item up or down within its category
+ */
+export function movePrestationItem(categoryKey: string, itemId: string, direction: 'up' | 'down'): void {
+  const all = getStoredPrestations();
+  const list = all[categoryKey] ? [...all[categoryKey]] : [];
+  const idx = list.findIndex((item) => item.id === itemId);
+  if (idx === -1) return;
+  const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= list.length) return;
+  const temp = list[idx];
+  list[idx] = list[targetIdx];
+  list[targetIdx] = temp;
+  all[categoryKey] = list;
+  savePrestations(all);
+}
+
+/**
+ * Resets all prestations or a single category to factory defaults both locally and on disk
+ */
+export function resetPrestations(categoryKey?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!categoryKey) {
+      localStorage.removeItem(STORAGE_KEYS.PRESTATIONS);
+      window.dispatchEvent(new CustomEvent(EVENT_NAME));
+      fetch('/api/reset-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section: 'prestations' }),
+      }).catch(() => {});
+    } else {
+      const all = getStoredPrestations();
+      const defaults = cloneDefaultPrestations();
+      all[categoryKey] = defaults[categoryKey] || [];
+      savePrestations(all);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Hydrates client storage from server disk (/public/data/site-data.json) on initial load
+ */
+let hasFetchedFromDisk = false;
+export async function syncFromDisk(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    const res = await fetch('/api/site-data', { cache: 'no-store' });
+    if (!res.ok) return;
+    const diskData = await res.json();
+    let changed = false;
+
+    if (diskData.photos && Object.keys(diskData.photos).length > 0) {
+      const mergedPhotos = { ...DEFAULT_PHOTOS, ...diskData.photos };
+      localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(mergedPhotos));
+      changed = true;
+    }
+
+    if (diskData.novelty && Object.keys(diskData.novelty).length > 0) {
+      const mergedNovelty = { ...DEFAULT_NOVELTY_OFFER, ...diskData.novelty };
+      localStorage.setItem(STORAGE_KEYS.NOVELTY, JSON.stringify(mergedNovelty));
+      changed = true;
+    }
+
+    if (diskData.prestations && Object.keys(diskData.prestations).length > 0) {
+      const mergedPrestations = { ...cloneDefaultPrestations(), ...diskData.prestations };
+      localStorage.setItem(STORAGE_KEYS.PRESTATIONS, JSON.stringify(mergedPrestations));
+      changed = true;
+    }
+
+    if (changed) {
+      window.dispatchEvent(new CustomEvent(EVENT_NAME));
+    }
+  } catch {
+    // fallback to localStorage if offline
   }
 }
 
@@ -437,12 +658,19 @@ export async function optimizeImageFile(file: File): Promise<string> {
 export function useSiteStore() {
   const [photos, setPhotos] = useState<Record<string, string>>(getStoredPhotos);
   const [novelty, setNovelty] = useState<NoveltyOfferData>(getStoredNoveltyOffer);
+  const [prestations, setPrestations] = useState<Record<string, PrestationItem[]>>(getStoredPrestations);
   const [isAdmin, setIsAdmin] = useState<boolean>(isSessionAdmin);
 
   useEffect(() => {
+    if (!hasFetchedFromDisk) {
+      hasFetchedFromDisk = true;
+      syncFromDisk();
+    }
+
     const handleUpdate = () => {
       setPhotos(getStoredPhotos());
       setNovelty(getStoredNoveltyOffer());
+      setPrestations(getStoredPrestations());
     };
 
     const handleAuth = () => {
@@ -463,12 +691,20 @@ export function useSiteStore() {
   return {
     photos,
     novelty,
+    prestations,
     isAdmin,
     updatePhoto: savePhoto,
     resetPhoto,
     resetAllPhotos,
     updateNovelty: saveNoveltyOffer,
     resetNovelty: resetNoveltyOffer,
+    savePrestations,
+    addPrestationItem,
+    updatePrestationItem,
+    deletePrestationItem,
+    movePrestationItem,
+    resetPrestations,
+    syncFromDisk,
     logout: () => setSessionAdmin(false),
   };
 }

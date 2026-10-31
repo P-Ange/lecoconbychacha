@@ -1,22 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock,
-  Unlock,
   X,
   Upload,
-  Image as ImageIcon,
   RotateCcw,
   Check,
   AlertCircle,
-  Eye,
   Sparkles,
   Layers,
   Save,
   LogOut,
-  ExternalLink,
   Plus,
   Trash2,
   Crop,
+  ListChecks,
+  Edit3,
+  ArrowUp,
+  ArrowDown,
+  Clock,
+  HardDrive,
 } from 'lucide-react';
 import { ImageCropModal } from './ImageCropModal';
 import { parseAspectRatio } from '../utils/cropImage';
@@ -24,39 +26,69 @@ import {
   useSiteStore,
   verifyAdminCredentials,
   setSessionAdmin,
-  isSessionAdmin,
-  optimizeImageFile,
   PHOTO_CATALOG,
   NoveltyOfferData,
   DEFAULT_NOVELTY_OFFER,
   DEFAULT_PHOTOS,
+  DEFAULT_PRESTATION_CATEGORIES,
+  PrestationItem,
 } from '../utils/siteStore';
 
 export const AdminModal: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'novelty' | 'photos'>('novelty');
+  const [activeTab, setActiveTab] = useState<'novelty' | 'prestations' | 'photos'>('novelty');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [authError, setAuthError] = useState('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
-  const [filterCategory, setFilterCategory] = useState<string>('all');
 
   const {
     photos,
     novelty,
+    prestations,
     isAdmin,
     updatePhoto,
     resetPhoto,
     resetAllPhotos,
     updateNovelty,
     resetNovelty,
+    addPrestationItem,
+    updatePrestationItem,
+    deletePrestationItem,
+    movePrestationItem,
+    resetPrestations,
     logout,
   } = useSiteStore();
 
   // Local editable draft for novelty offer
   const [noveltyDraft, setNoveltyDraft] = useState<NoveltyOfferData>(novelty);
-  const [selectedPhotoKey, setSelectedPhotoKey] = useState<string>('exclusiveOffer');
+
+  // Prestations Manager state
+  const [selectedPrestCategory, setSelectedPrestCategory] = useState<string>('head-spa');
+  const [editingPrestationId, setEditingPrestationId] = useState<string | null>(null);
+  const [isAddingPrestation, setIsAddingPrestation] = useState<boolean>(false);
+  const [prestForm, setPrestForm] = useState<{
+    name: string;
+    duration: string;
+    price: string;
+    oldPrice: string;
+    desc: string;
+    subCategory: string;
+    badge: string;
+    notice: string;
+    popular: boolean;
+  }>({
+    name: '',
+    duration: '1h',
+    price: '45 €',
+    oldPrice: '',
+    desc: '',
+    subCategory: '',
+    badge: '',
+    notice: '',
+    popular: false,
+  });
 
   // Cropper Modal state
   const [cropState, setCropState] = useState<{
@@ -87,6 +119,9 @@ export const AdminModal: React.FC = () => {
       if (e?.detail?.tab) {
         setActiveTab(e.detail.tab);
       }
+      if (e?.detail?.category) {
+        setSelectedPrestCategory(e.detail.category);
+      }
     };
 
     window.addEventListener('open_admin_modal', handleOpen);
@@ -114,7 +149,7 @@ export const AdminModal: React.FC = () => {
       setPassword('');
       showSuccess("Connexion réussie. Bienvenue dans votre espace d'administration ! ✨");
     } else {
-      setAuthError("Code ou mot de passe incorrect. (Indice : code: admin / pass: chacha)");
+      setAuthError('Identifiant ou mot de passe incorrect. Veuillez réessayer.');
     }
   };
 
@@ -127,7 +162,7 @@ export const AdminModal: React.FC = () => {
     setSaveSuccessMsg(msg);
     setTimeout(() => {
       setSaveSuccessMsg('');
-    }, 4000);
+    }, 4500);
   };
 
   // Helper to read raw file as data URL for interactive cropping
@@ -135,7 +170,7 @@ export const AdminModal: React.FC = () => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Impossible de lire le fichier image sélectionné."));
+      reader.onerror = () => reject(new Error('Impossible de lire le fichier image sélectionné.'));
       reader.readAsDataURL(file);
     });
   };
@@ -151,14 +186,13 @@ export const AdminModal: React.FC = () => {
         isOpen: true,
         imageSrc: dataUrl,
         targetKey: 'novelty',
-        targetTitle: "Offre Exclusivité & Nouveauté",
+        targetTitle: 'Offre Exclusivité & Nouveauté',
         recommendedAspect: 4 / 5,
-        recommendedAspectLabel: "4:5 Portrait / Évasif",
+        recommendedAspectLabel: '4:5 Portrait / Évasif',
       });
-      // Reset input value so re-selecting same image fires onChange
       e.target.value = '';
-    } catch (err) {
-      alert("Erreur lors de la lecture du fichier image. Veuillez réessayer.");
+    } catch {
+      alert('Erreur lors de la lecture du fichier image. Veuillez réessayer.');
     }
   };
 
@@ -168,7 +202,7 @@ export const AdminModal: React.FC = () => {
     if (!file) return;
 
     const catalogItem = PHOTO_CATALOG.find((p) => p.key === key);
-    const aspect = parseAspectRatio(catalogItem?.aspect) || (4 / 3);
+    const aspect = parseAspectRatio(catalogItem?.aspect) || 4 / 3;
 
     try {
       const dataUrl = await readFileAsDataUrl(file);
@@ -181,8 +215,8 @@ export const AdminModal: React.FC = () => {
         recommendedAspectLabel: catalogItem?.aspect || '4:3',
       });
       e.target.value = '';
-    } catch (err) {
-      alert("Erreur lors de la lecture du fichier image.");
+    } catch {
+      alert('Erreur lors de la lecture du fichier image.');
     }
   };
 
@@ -193,16 +227,16 @@ export const AdminModal: React.FC = () => {
       isOpen: true,
       imageSrc: currentSrc,
       targetKey: 'novelty',
-      targetTitle: "Offre Exclusivité & Nouveauté (Ajuster le cadrage)",
+      targetTitle: 'Offre Exclusivité & Nouveauté (Ajuster le cadrage)',
       recommendedAspect: 4 / 5,
-      recommendedAspectLabel: "4:5 Portrait / Évasif",
+      recommendedAspectLabel: '4:5 Portrait / Évasif',
     });
   };
 
   // Allows cropping an existing slot photo without uploading a new file
   const handleOpenCropForSlot = (item: (typeof PHOTO_CATALOG)[0]) => {
     const currentSrc = photos[item.key] || item.defaultSrc;
-    const aspect = parseAspectRatio(item.aspect) || (4 / 3);
+    const aspect = parseAspectRatio(item.aspect) || 4 / 3;
     setCropState({
       isOpen: true,
       imageSrc: currentSrc,
@@ -213,22 +247,22 @@ export const AdminModal: React.FC = () => {
     });
   };
 
-  // Validates and applies the cropped image to store
-  const handleCropConfirm = (croppedDataUrl: string) => {
-    if (cropState.targetKey === 'novelty') {
-      setNoveltyDraft((prev) => ({ ...prev, photo: croppedDataUrl }));
-      updateNovelty({ photo: croppedDataUrl });
-      updatePhoto('exclusiveOffer', croppedDataUrl);
-      showSuccess("Photo de l'offre recadrée et enregistrée avec succès ! ✨");
-    } else {
-      updatePhoto(cropState.targetKey, croppedDataUrl);
-      if (cropState.targetKey === 'exclusiveOffer') {
-        updateNovelty({ photo: croppedDataUrl });
-        setNoveltyDraft((prev) => ({ ...prev, photo: croppedDataUrl }));
-      }
-      showSuccess(`Photo recadrée et mise à jour pour : ${cropState.targetTitle} ! ✨`);
-    }
+  // Validates and applies the cropped image to store & server disk
+  const handleCropConfirm = async (croppedDataUrl: string) => {
     setCropState((prev) => ({ ...prev, isOpen: false }));
+    if (cropState.targetKey === 'novelty') {
+      const diskUrl = await updatePhoto('exclusiveOffer', croppedDataUrl);
+      setNoveltyDraft((prev) => ({ ...prev, photo: diskUrl }));
+      updateNovelty({ photo: diskUrl });
+      showSuccess("Photo de l'offre recadrée et sauvegardée dans le dossier du site ! ✨");
+    } else {
+      const diskUrl = await updatePhoto(cropState.targetKey, croppedDataUrl);
+      if (cropState.targetKey === 'exclusiveOffer') {
+        updateNovelty({ photo: diskUrl });
+        setNoveltyDraft((prev) => ({ ...prev, photo: diskUrl }));
+      }
+      showSuccess(`Photo recadrée et sauvegardée dans le dossier du site pour : ${cropState.targetTitle} ! ✨`);
+    }
   };
 
   const handleCropCancel = () => {
@@ -237,7 +271,7 @@ export const AdminModal: React.FC = () => {
 
   const handleSaveNovelty = () => {
     updateNovelty(noveltyDraft);
-    showSuccess("L'Offre Exclusivité & Nouveauté a été enregistrée avec succès ! ✨");
+    showSuccess("L'Offre Exclusivité & Nouveauté a été sauvegardée dans le dossier du site ! ✨");
   };
 
   const handleResetNovelty = () => {
@@ -251,12 +285,107 @@ export const AdminModal: React.FC = () => {
   const handleResetAllPhotos = () => {
     if (window.confirm("Êtes-vous sûr(e) de vouloir rétablir toutes les photos d'origine du site ?")) {
       resetAllPhotos();
-      showSuccess("Toutes les photos ont été rétablies à leur version initiale.");
+      showSuccess('Toutes les photos ont été rétablies à leur version initiale.');
+    }
+  };
+
+  // ========================================================
+  // PRESTATIONS CRUD HANDLERS
+  // ========================================================
+  const startAddNewPrestation = () => {
+    setEditingPrestationId(null);
+    setPrestForm({
+      name: '',
+      duration: '1h',
+      price: '50 €',
+      oldPrice: '',
+      desc: '',
+      subCategory: '',
+      badge: '',
+      notice: '',
+      popular: false,
+    });
+    setIsAddingPrestation(true);
+  };
+
+  const startEditPrestation = (item: PrestationItem) => {
+    setIsAddingPrestation(false);
+    setEditingPrestationId(item.id);
+    setPrestForm({
+      name: item.name || '',
+      duration: item.duration || '',
+      price: item.price || '',
+      oldPrice: item.oldPrice || '',
+      desc: item.desc || '',
+      subCategory: item.subCategory || '',
+      badge: item.badge || '',
+      notice: item.notice || '',
+      popular: Boolean(item.popular),
+    });
+  };
+
+  const cancelPrestationForm = () => {
+    setIsAddingPrestation(false);
+    setEditingPrestationId(null);
+  };
+
+  const handleSavePrestationForm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prestForm.name.trim() || !prestForm.price.trim()) {
+      alert('Veuillez renseigner au minimum le titre et le tarif de la prestation.');
+      return;
+    }
+
+    const payload = {
+      name: prestForm.name.trim(),
+      duration: prestForm.duration.trim() || 'Sur RDV',
+      price: prestForm.price.trim(),
+      oldPrice: prestForm.oldPrice.trim() || undefined,
+      desc: prestForm.desc.trim(),
+      subCategory: prestForm.subCategory.trim() || undefined,
+      badge: prestForm.badge.trim() || undefined,
+      notice: prestForm.notice.trim() || undefined,
+      popular: prestForm.popular,
+    };
+
+    if (isAddingPrestation) {
+      addPrestationItem(selectedPrestCategory, payload);
+      showSuccess(`Nouvelle prestation "${payload.name}" ajoutée et enregistrée dans le dossier du site ! ✨`);
+      setIsAddingPrestation(false);
+    } else if (editingPrestationId) {
+      updatePrestationItem(selectedPrestCategory, editingPrestationId, payload);
+      showSuccess(`Prestation "${payload.name}" modifiée et enregistrée dans le dossier du site ! ✨`);
+      setEditingPrestationId(null);
+    }
+  };
+
+  const handleDeletePrestation = (item: PrestationItem) => {
+    if (window.confirm(`Voulez-vous vraiment supprimer la prestation "${item.name}" ?`)) {
+      deletePrestationItem(selectedPrestCategory, item.id);
+      showSuccess(`Prestation "${item.name}" supprimée et enregistrée.`);
+      if (editingPrestationId === item.id) {
+        setEditingPrestationId(null);
+      }
+    }
+  };
+
+  const handleResetCategoryPrestations = () => {
+    const catLabel =
+      DEFAULT_PRESTATION_CATEGORIES.find((c) => c.id === selectedPrestCategory)?.label ||
+      selectedPrestCategory;
+    if (
+      window.confirm(
+        `Voulez-vous rétablir les prestations par défaut pour la catégorie "${catLabel}" ?`
+      )
+    ) {
+      resetPrestations(selectedPrestCategory);
+      setIsAddingPrestation(false);
+      setEditingPrestationId(null);
+      showSuccess(`Catégorie "${catLabel}" rétablie à ses prestations d'origine.`);
     }
   };
 
   if (!isOpen) {
-    // Show a small discreet floating icon if admin is active
     if (isAdmin) {
       return (
         <div className="fixed bottom-5 left-5 z-40">
@@ -274,6 +403,8 @@ export const AdminModal: React.FC = () => {
     return null;
   }
 
+  const currentCategoryItems = prestations[selectedPrestCategory] || [];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       
@@ -290,8 +421,13 @@ export const AdminModal: React.FC = () => {
               <h2 className="font-serif-title text-xl sm:text-2xl font-bold uppercase tracking-wide text-[#2C2523]">
                 Espace Administration Privé
               </h2>
-              <p className="text-xs text-[#5A4E46]">
-                Le Cocon Sensoriel by Chacha • Gestion autonome des photos &amp; offres
+              <p className="text-xs text-[#5A4E46] flex items-center gap-1.5">
+                <span>Le Cocon Sensoriel by Chacha</span>
+                {isAdmin && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] text-emerald-700 font-semibold">
+                    <HardDrive className="w-3 h-3" /> Sauvegarde directe dans le dossier du site
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -329,7 +465,7 @@ export const AdminModal: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
           
           {/* ========================================================
-              UNAUTHENTICATED VIEW: LOGIN FORM
+              UNAUTHENTICATED VIEW: LOGIN FORM (WITHOUT EXPOSED CREDENTIALS)
               ======================================================== */}
           {!isAdmin ? (
             <div className="max-w-md mx-auto py-8 space-y-6">
@@ -342,7 +478,7 @@ export const AdminModal: React.FC = () => {
                   Accès Réservé
                 </h3>
                 <p className="text-sm text-[#5A4E46]">
-                  Connectez-vous pour mettre à jour les photos du site et l'offre d'exception à tout moment.
+                  Connectez-vous pour gérer la carte des prestations, l'offre du moment et les photos du site.
                 </p>
               </div>
 
@@ -357,14 +493,14 @@ export const AdminModal: React.FC = () => {
                 
                 <div>
                   <label className="block text-xs uppercase tracking-wider font-semibold text-[#5A4E46] mb-1.5">
-                    Identifiant / Code
+                    Identifiant
                   </label>
                   <input
                     type="text"
                     name="username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="admin"
+                    placeholder="Votre identifiant"
                     autoFocus
                     required
                     className="w-full px-4 py-2.5 rounded-xl border border-[#D5C4B0] bg-white text-[#2C2523] text-sm focus:outline-none focus:ring-2 focus:ring-[#9E8256]"
@@ -407,11 +543,6 @@ export const AdminModal: React.FC = () => {
                 </button>
               </form>
 
-              <div className="text-center text-xs text-[#5A4E46]/80 space-y-1">
-                <p>Identifiants d'accès convenus :</p>
-                <p className="font-mono text-[#9E8256]">Code : <strong>admin</strong> • Mot de passe : <strong>chacha</strong></p>
-              </div>
-
             </div>
           ) : (
             /* ========================================================
@@ -423,7 +554,7 @@ export const AdminModal: React.FC = () => {
               <div className="flex flex-wrap gap-2 border-b border-[#E8D8C8] pb-4">
                 <button
                   onClick={() => setActiveTab('novelty')}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs uppercase tracking-wider font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-full text-xs uppercase tracking-wider font-semibold transition-all cursor-pointer ${
                     activeTab === 'novelty'
                       ? 'bg-[#9E8256] text-white shadow-md'
                       : 'bg-[#F3ECE1] text-[#5A4E46] hover:bg-[#E8D8C8]'
@@ -434,15 +565,27 @@ export const AdminModal: React.FC = () => {
                 </button>
 
                 <button
+                  onClick={() => setActiveTab('prestations')}
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-full text-xs uppercase tracking-wider font-semibold transition-all cursor-pointer ${
+                    activeTab === 'prestations'
+                      ? 'bg-[#9E8256] text-white shadow-md'
+                      : 'bg-[#F3ECE1] text-[#5A4E46] hover:bg-[#E8D8C8]'
+                  }`}
+                >
+                  <ListChecks className="w-4 h-4" />
+                  <span>Carte des Prestations &amp; Tarifs</span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('photos')}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-xs uppercase tracking-wider font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-full text-xs uppercase tracking-wider font-semibold transition-all cursor-pointer ${
                     activeTab === 'photos'
                       ? 'bg-[#9E8256] text-white shadow-md'
                       : 'bg-[#F3ECE1] text-[#5A4E46] hover:bg-[#E8D8C8]'
                   }`}
                 >
                   <Layers className="w-4 h-4" />
-                  <span>Toutes les Photos du Site ({PHOTO_CATALOG.length})</span>
+                  <span>Photos du Site ({PHOTO_CATALOG.length})</span>
                 </button>
               </div>
 
@@ -459,7 +602,7 @@ export const AdminModal: React.FC = () => {
                           Photo de l'Offre Exclusivité &amp; Nouveauté
                         </h3>
                         <p className="text-xs text-[#5A4E46]">
-                          Vous pouvez changer cette photo en toute autonomie à tout moment.
+                          La photo recadrée est directement sauvegardée dans le dossier <code>/public/uploads/</code> du site.
                         </p>
                       </div>
                       <span className="text-xs font-semibold px-3 py-1 rounded-full bg-[#E8D8C8] text-[#9E8256]">
@@ -507,7 +650,7 @@ export const AdminModal: React.FC = () => {
 
                         <div className="pt-1">
                           <span className="text-xs font-semibold text-[#5A4E46] block mb-1">
-                            Ou renseigner un lien direct d'image (URL) :
+                            Chemin du fichier dans le dossier du site :
                           </span>
                           <div className="flex gap-2">
                             <input
@@ -519,8 +662,8 @@ export const AdminModal: React.FC = () => {
                                 updateNovelty({ photo: val });
                                 updatePhoto('exclusiveOffer', val);
                               }}
-                              placeholder="https://..."
-                              className="flex-1 px-3 py-1.5 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                              placeholder="/uploads/..."
+                              className="flex-1 px-3 py-1.5 rounded-xl border border-[#D5C4B0] bg-white text-xs font-mono"
                             />
                             <button
                               type="button"
@@ -528,7 +671,7 @@ export const AdminModal: React.FC = () => {
                                 updatePhoto('exclusiveOffer', DEFAULT_PHOTOS.exclusiveOffer);
                                 setNoveltyDraft((prev) => ({ ...prev, photo: DEFAULT_PHOTOS.exclusiveOffer }));
                                 updateNovelty({ photo: DEFAULT_PHOTOS.exclusiveOffer });
-                                showSuccess("Photo rétablie à la version initiale.");
+                                showSuccess('Photo rétablie à la version initiale.');
                               }}
                               className="px-3 py-1.5 rounded-xl bg-[#F3ECE1] hover:bg-[#E8D8C8] text-[#5A4E46] text-xs font-medium cursor-pointer"
                               title="Rétablir la photo d'origine"
@@ -645,17 +788,19 @@ export const AdminModal: React.FC = () => {
                           className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
                         />
                       </div>
-
                     </div>
 
-                    {/* Étapes du soin */}
+                    {/* Steps Editor */}
                     <div className="pt-2 border-t border-[#E8D8C8] space-y-3">
                       <label className="block text-xs uppercase tracking-wider font-semibold text-[#2C2523]">
                         Les 3 Étapes du Soin Incluses :
                       </label>
-                      
+
                       {noveltyDraft.services.map((step, idx) => (
-                        <div key={idx} className="p-3 bg-[#F4ECE0]/60 rounded-xl border border-[#E8D8C8] grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                        <div
+                          key={idx}
+                          className="p-3 bg-[#F4ECE0]/60 rounded-xl border border-[#E8D8C8] grid grid-cols-1 sm:grid-cols-12 gap-3 items-center"
+                        >
                           <div className="sm:col-span-2">
                             <input
                               type="text"
@@ -726,7 +871,345 @@ export const AdminModal: React.FC = () => {
               )}
 
               {/* ========================================================
-                  TAB 2: GESTION DE TOUTES LES PHOTOS DU SITE
+                  TAB 2: GESTION CARTE DES PRESTATIONS & TARIFS (ADD / EDIT / DELETE)
+                  ======================================================== */}
+              {activeTab === 'prestations' && (
+                <div className="space-y-6">
+                  
+                  {/* Header & Category Selector */}
+                  <div className="bg-[#FAF6F0] p-4 sm:p-5 rounded-2xl border border-[#E8D8C8] shadow-sm space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-serif-title text-xl font-bold uppercase tracking-wide text-[#2C2523]">
+                          Gestion de la Carte des Prestations
+                        </h3>
+                        <p className="text-xs text-[#5A4E46]">
+                          Ajoutez, modifiez ou supprimez librement vos prestations et tarifs. Tout est sauvegardé dans le dossier du site.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={startAddNewPrestation}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-gradient-to-r from-[#9E8256] to-[#B5986B] hover:from-[#8A6F44] hover:to-[#9E8256] text-white text-xs font-bold shadow-md cursor-pointer transition-all"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Ajouter une prestation</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleResetCategoryPrestations}
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-full bg-[#F3ECE1] hover:bg-[#E8D8C8] text-[#5A4E46] text-xs font-medium cursor-pointer"
+                          title="Rétablir les prestations d'origine de cette catégorie"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Rétablir la catégorie</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Category Pills */}
+                    <div className="flex flex-wrap gap-1.5 pt-2 border-t border-[#E8D8C8]">
+                      {DEFAULT_PRESTATION_CATEGORIES.map((cat) => {
+                        const count = (prestations[cat.id] || []).length;
+                        const active = selectedPrestCategory === cat.id;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPrestCategory(cat.id);
+                              setIsAddingPrestation(false);
+                              setEditingPrestationId(null);
+                            }}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                              active
+                                ? 'bg-[#2C2523] text-[#FAF6F0] shadow-sm'
+                                : 'bg-[#F3ECE1] text-[#5A4E46] hover:bg-[#E8D8C8]'
+                            }`}
+                          >
+                            <span>{cat.label}</span>
+                            <span
+                              className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                                active ? 'bg-[#B5986B] text-white' : 'bg-[#E8D8C8] text-[#8A6F44]'
+                              }`}
+                            >
+                              {count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ADD OR EDIT FORM */}
+                  {(isAddingPrestation || editingPrestationId) && (
+                    <form
+                      onSubmit={handleSavePrestationForm}
+                      className="bg-[#FAF6F0] p-5 rounded-2xl border-2 border-[#9E8256] shadow-lg space-y-4 animate-fadeIn"
+                    >
+                      <div className="flex items-center justify-between border-b border-[#E8D8C8] pb-3">
+                        <h4 className="font-serif-title text-lg font-bold uppercase text-[#2C2523] flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-[#9E8256]" />
+                          <span>
+                            {isAddingPrestation
+                              ? `Nouvelle Prestation (${
+                                  DEFAULT_PRESTATION_CATEGORIES.find((c) => c.id === selectedPrestCategory)?.label
+                                })`
+                              : 'Modifier la Prestation'}
+                          </span>
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={cancelPrestationForm}
+                          className="text-xs text-[#5A4E46] hover:text-[#2C2523] underline cursor-pointer"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
+                        <div className="sm:col-span-6">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Nom de la prestation *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={prestForm.name}
+                            onChange={(e) => setPrestForm({ ...prestForm, name: e.target.value })}
+                            placeholder="Ex: Rituel Voyage Sensoriel (1h)"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs font-medium"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Durée *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={prestForm.duration}
+                            onChange={(e) => setPrestForm({ ...prestForm, duration: e.target.value })}
+                            placeholder="Ex: 1h 15min"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Tarif *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={prestForm.price}
+                            onChange={(e) => setPrestForm({ ...prestForm, price: e.target.value })}
+                            placeholder="Ex: 80 € ou de 15 € à 25 €"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs font-bold text-[#2C2523]"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-4">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Sous-catégorie (optionnel)
+                          </label>
+                          <input
+                            type="text"
+                            value={prestForm.subCategory}
+                            onChange={(e) => setPrestForm({ ...prestForm, subCategory: e.target.value })}
+                            placeholder="Ex: Head Spa Homme & Femme"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-4">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Badge spécial (optionnel)
+                          </label>
+                          <input
+                            type="text"
+                            value={prestForm.badge}
+                            onChange={(e) => setPrestForm({ ...prestForm, badge: e.target.value })}
+                            placeholder="Ex: Coup de cœur, Nouveauté..."
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-4">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Ancien prix barré (optionnel)
+                          </label>
+                          <input
+                            type="text"
+                            value={prestForm.oldPrice}
+                            onChange={(e) => setPrestForm({ ...prestForm, oldPrice: e.target.value })}
+                            placeholder="Ex: 135 €"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-12">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Description détaillée
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={prestForm.desc}
+                            onChange={(e) => setPrestForm({ ...prestForm, desc: e.target.value })}
+                            placeholder="Détails du soin, étapes, recommandations..."
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-8">
+                          <label className="block text-xs font-semibold text-[#5A4E46] mb-1">
+                            Mention ou note importante (optionnel)
+                          </label>
+                          <input
+                            type="text"
+                            value={prestForm.notice}
+                            onChange={(e) => setPrestForm({ ...prestForm, notice: e.target.value })}
+                            placeholder="Ex: Réservé uniquement à la clientèle féminine"
+                            className="w-full px-3 py-2 rounded-xl border border-[#D5C4B0] bg-white text-xs"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-4 flex items-end pb-1">
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={prestForm.popular}
+                              onChange={(e) => setPrestForm({ ...prestForm, popular: e.target.checked })}
+                              className="w-4 h-4 rounded text-[#9E8256] focus:ring-[#9E8256]"
+                            />
+                            <span className="text-xs font-semibold text-[#2C2523]">
+                              Mettre en valeur (encadré doré)
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E8D8C8]">
+                        <button
+                          type="button"
+                          onClick={cancelPrestationForm}
+                          className="px-4 py-2 rounded-full bg-[#F3ECE1] hover:bg-[#E8D8C8] text-[#5A4E46] text-xs font-semibold cursor-pointer"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1.5 px-6 py-2 rounded-full bg-gradient-to-r from-[#9E8256] to-[#B5986B] text-white text-xs font-bold shadow-md cursor-pointer"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Enregistrer la prestation</span>
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* LIST OF PRESTATIONS IN SELECTED CATEGORY */}
+                  <div className="space-y-3">
+                    {currentCategoryItems.length === 0 ? (
+                      <div className="text-center py-8 bg-[#FAF6F0] rounded-2xl border border-[#E8D8C8] text-xs text-[#5A4E46]">
+                        Aucune prestation dans cette catégorie. Cliquez sur « Ajouter une prestation » pour commencer.
+                      </div>
+                    ) : (
+                      currentCategoryItems.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          className={`p-4 rounded-2xl bg-[#FAF6F0] border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                            editingPrestationId === item.id
+                              ? 'border-[#9E8256] ring-2 ring-[#9E8256]/30'
+                              : item.popular
+                              ? 'border-[#B5986B]'
+                              : 'border-[#E8D8C8]'
+                          }`}
+                        >
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              {item.subCategory && (
+                                <span className="text-[10px] uppercase tracking-wider font-semibold text-[#9E8256]">
+                                  {item.subCategory}
+                                </span>
+                              )}
+                              {item.badge && (
+                                <span className="px-2 py-0.5 rounded-full bg-[#E8D8C8] text-[#8A6F44] text-[10px] font-bold">
+                                  {item.badge}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <h4 className="font-serif-title text-base font-bold text-[#2C2523]">
+                                {item.name}
+                              </h4>
+                              <span className="text-xs text-[#9E8256] font-medium flex items-center gap-1">
+                                <Clock className="w-3 h-3" /> {item.duration}
+                              </span>
+                              <span className="font-serif-title text-lg font-bold text-[#2C2523] ml-auto sm:ml-2">
+                                {item.price}
+                              </span>
+                            </div>
+
+                            {item.desc && (
+                              <p className="text-xs text-[#5A4E46] line-clamp-2">{item.desc}</p>
+                            )}
+                          </div>
+
+                          {/* Item Actions: Move Up/Down, Edit, Delete */}
+                          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => movePrestationItem(selectedPrestCategory, item.id, 'up')}
+                              className="w-7 h-7 rounded-lg bg-[#F3ECE1] hover:bg-[#E8D8C8] disabled:opacity-30 flex items-center justify-center text-[#5A4E46] cursor-pointer"
+                              title="Monter"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === currentCategoryItems.length - 1}
+                              onClick={() => movePrestationItem(selectedPrestCategory, item.id, 'down')}
+                              className="w-7 h-7 rounded-lg bg-[#F3ECE1] hover:bg-[#E8D8C8] disabled:opacity-30 flex items-center justify-center text-[#5A4E46] cursor-pointer"
+                              title="Descendre"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => startEditPrestation(item)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-[#F3ECE1] hover:bg-[#9E8256] hover:text-white text-[#2C2523] text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              <Edit3 className="w-3 h-3" />
+                              <span>Modifier</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePrestation(item)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-full bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+                              title="Supprimer cette prestation"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                </div>
+              )}
+
+              {/* ========================================================
+                  TAB 3: GESTION DE TOUTES LES PHOTOS DU SITE
                   ======================================================== */}
               {activeTab === 'photos' && (
                 <div className="space-y-6">
@@ -737,7 +1220,7 @@ export const AdminModal: React.FC = () => {
                         Gestionnaire Global des Photos
                       </h3>
                       <p className="text-xs text-[#5A4E46]">
-                        Personnalisez n'importe quelle photo du site sans modifier une seule ligne de code.
+                        Chaque photo importée et cadrée est enregistrée directement dans le dossier <code>/public/uploads/</code> du site.
                       </p>
                     </div>
 
@@ -847,9 +1330,9 @@ export const AdminModal: React.FC = () => {
 
         </div>
 
-        {/* Footer */}
+        {/* Footer (without exposed username) */}
         <div className="px-6 py-3 border-t border-[#E8D8C8] bg-[#F4ECE0]/50 flex items-center justify-between text-xs text-[#5A4E46]">
-          <span>Espace protégé • Identifiant : <strong>admin</strong></span>
+          <span>Espace d'administration sécurisé • Le Cocon Sensoriel</span>
           <button
             onClick={() => setIsOpen(false)}
             className="px-4 py-1.5 rounded-full bg-[#E8D8C8] hover:bg-[#D5C4B0] text-[#2C2523] font-medium transition-colors cursor-pointer"
