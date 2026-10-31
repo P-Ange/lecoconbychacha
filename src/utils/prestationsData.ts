@@ -72,7 +72,9 @@ export const DEFAULT_PRESTATIONS: Record<string, PrestationItem[]> = {
       duration: '1h 45min',
       price: '110 €',
       desc: "Rituel complet d'1h sur le cuir chevelu avec 30 min de modelage du dos et des pieds pour une détente profonde. Analyse du cuir chevelu et des cheveux, massage du visage et du corps + shampoing, rituels de modelage et soin profond sous vapeur. Durée 1h30, compter 30 minutes de plus.",
-      subCategory: 'Head Spa Japonais Homme & Femme',
+      subCategory: 'Head Spa Japonais — Uniquement pour les femmes',
+      badge: 'Réservé aux Femmes',
+      notice: 'Réservé uniquement à la clientèle féminine',
     },
     {
       id: 'hs-serenite',
@@ -89,8 +91,9 @@ export const DEFAULT_PRESTATIONS: Record<string, PrestationItem[]> = {
       price: '140 €',
       desc: "1h de Head Spa dédié au cuir chevelu, suivi d'1h de modelage sensoriel corps. Analyse du cuir chevelu et des cheveux, massage du visage et du corps + shampoing, rituels de modelage et soin profond sous vapeur. Durée 2h, compter 30 minutes de plus que votre rituel.",
       popular: true,
-      badge: 'Prestige Sensoriel',
-      subCategory: 'Head Spa Japonais Homme & Femme',
+      badge: 'Prestige Sensoriel • Femme',
+      subCategory: 'Head Spa Japonais — Uniquement pour les femmes',
+      notice: 'Réservé uniquement à la clientèle féminine',
     },
     {
       id: 'hs-sechage',

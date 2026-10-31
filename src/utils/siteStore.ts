@@ -450,7 +450,19 @@ export function getStoredPrestations(): Record<string, PrestationItem[]> {
     const merged: Record<string, PrestationItem[]> = cloneDefaultPrestations();
     for (const key of Object.keys(parsed)) {
       if (Array.isArray(parsed[key])) {
-        merged[key] = parsed[key];
+        merged[key] = parsed[key].map((item: PrestationItem) => {
+          if (
+            (item.id === 'hs-evasion-profonde' || item.id === 'hs-prestige') &&
+            item.subCategory === 'Head Spa Japonais Homme & Femme'
+          ) {
+            return {
+              ...item,
+              subCategory: 'Head Spa Japonais — Uniquement pour les femmes',
+              notice: item.notice || 'Réservé uniquement à la clientèle féminine',
+            };
+          }
+          return item;
+        });
       }
     }
     return merged;

@@ -8,7 +8,7 @@ export const SALON_INFO = {
   tagline: "Beauté • Bien-Être • Éveil des Sens",
   phoneDisplay: "06 71 87 14 00",
   phoneRaw: "+33671871400",
-  address: "4 rue Carnot, 70180 Dampierre-sur-Salon",
+  address: "10 rue Carnot, 70180 Dampierre-sur-Salon",
   city: "Dampierre-sur-Salon",
   postalCode: "70180",
   planityUrl: "https://www.planity.com/le-cocon-sensoriel-by-chacha-70180-dampierre-sur-salon",
