@@ -247,21 +247,21 @@ export const AdminModal: React.FC = () => {
     });
   };
 
-  // Validates and applies the cropped image to store & server disk
+  // Validates and applies the cropped image to Supabase Storage ("salon-images") & table ("site_images")
   const handleCropConfirm = async (croppedDataUrl: string) => {
     setCropState((prev) => ({ ...prev, isOpen: false }));
     if (cropState.targetKey === 'novelty') {
-      const diskUrl = await updatePhoto('exclusiveOffer', croppedDataUrl);
-      setNoveltyDraft((prev) => ({ ...prev, photo: diskUrl }));
-      updateNovelty({ photo: diskUrl });
-      showSuccess("Photo de l'offre recadrée et sauvegardée dans le dossier du site ! ✨");
+      const publicUrl = await updatePhoto('exclusiveOffer', croppedDataUrl);
+      setNoveltyDraft((prev) => ({ ...prev, photo: publicUrl }));
+      updateNovelty({ photo: publicUrl });
+      showSuccess("Photo de l'offre recadrée et sauvegardée sur Supabase ! ✨");
     } else {
-      const diskUrl = await updatePhoto(cropState.targetKey, croppedDataUrl);
+      const publicUrl = await updatePhoto(cropState.targetKey, croppedDataUrl);
       if (cropState.targetKey === 'exclusiveOffer') {
-        updateNovelty({ photo: diskUrl });
-        setNoveltyDraft((prev) => ({ ...prev, photo: diskUrl }));
+        updateNovelty({ photo: publicUrl });
+        setNoveltyDraft((prev) => ({ ...prev, photo: publicUrl }));
       }
-      showSuccess(`Photo recadrée et sauvegardée dans le dossier du site pour : ${cropState.targetTitle} ! ✨`);
+      showSuccess(`Photo recadrée et sauvegardée sur Supabase pour : ${cropState.targetTitle} ! ✨`);
     }
   };
 
@@ -271,7 +271,7 @@ export const AdminModal: React.FC = () => {
 
   const handleSaveNovelty = () => {
     updateNovelty(noveltyDraft);
-    showSuccess("L'Offre Exclusivité & Nouveauté a été sauvegardée dans le dossier du site ! ✨");
+    showSuccess("L'Offre Exclusivité & Nouveauté a été sauvegardée avec succès ! ✨");
   };
 
   const handleResetNovelty = () => {
@@ -425,7 +425,7 @@ export const AdminModal: React.FC = () => {
                 <span>Le Cocon Sensoriel by Chacha</span>
                 {isAdmin && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] text-emerald-700 font-semibold">
-                    <HardDrive className="w-3 h-3" /> Sauvegarde directe dans le dossier du site
+                    <HardDrive className="w-3 h-3" /> Synchronisé avec Supabase Cloud
                   </span>
                 )}
               </p>
@@ -602,7 +602,7 @@ export const AdminModal: React.FC = () => {
                           Photo de l'Offre Exclusivité &amp; Nouveauté
                         </h3>
                         <p className="text-xs text-[#5A4E46]">
-                          La photo recadrée est directement sauvegardée dans le dossier <code>/public/uploads/</code> du site.
+                          La photo recadrée est envoyée dans le bucket Supabase Storage <code>salon-images</code> et enregistrée dans <code>site_images</code>.
                         </p>
                       </div>
                       <span className="text-xs font-semibold px-3 py-1 rounded-full bg-[#E8D8C8] text-[#9E8256]">
@@ -650,7 +650,7 @@ export const AdminModal: React.FC = () => {
 
                         <div className="pt-1">
                           <span className="text-xs font-semibold text-[#5A4E46] block mb-1">
-                            Chemin du fichier dans le dossier du site :
+                            URL publique de l'image (Supabase Storage) :
                           </span>
                           <div className="flex gap-2">
                             <input
@@ -1220,7 +1220,7 @@ export const AdminModal: React.FC = () => {
                         Gestionnaire Global des Photos
                       </h3>
                       <p className="text-xs text-[#5A4E46]">
-                        Chaque photo importée et cadrée est enregistrée directement dans le dossier <code>/public/uploads/</code> du site.
+                        Chaque photo importée et cadrée est stockée dans le bucket Supabase <code>salon-images</code> et sauvegardée dans la table <code>site_images</code>.
                       </p>
                     </div>
 

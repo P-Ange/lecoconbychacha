@@ -6,6 +6,7 @@
  * - Event-based reactivity for instantaneous UI updates
  */
 import { useEffect, useState } from 'react';
+import { supabase, dataUrlToBlob } from './supabaseClient';
 import {
   PrestationItem,
   DEFAULT_PRESTATIONS,
@@ -13,6 +14,7 @@ import {
   PrestationCategory,
 } from './prestationsData';
 
+export { supabase };
 export type { PrestationItem, PrestationCategory };
 export { DEFAULT_PRESTATIONS, DEFAULT_PRESTATION_CATEGORIES };
 
@@ -235,49 +237,89 @@ export function getStoredPhotos(): Record<string, string> {
 }
 
 /**
- * Saves photo to localStorage AND writes the image file directly to server disk (/public/uploads/)
+ * Uploads an image (File, Blob, or Base64 Data URL) to Supabase Storage bucket "salon-images",
+ * retrieves its public URL via getPublicUrl, and upserts { id: key, url: publicUrl } into "site_images".
  */
-export async function savePhoto(key: string, urlOrBase64: string): Promise<string> {
-  if (typeof window === 'undefined') return urlOrBase64;
-
-  // Immediate optimistic update
-  const current = getStoredPhotos();
-  current[key] = urlOrBase64;
-  try {
-    localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(current));
-    window.dispatchEvent(new CustomEvent(EVENT_NAME));
-  } catch (err) {
-    console.warn('Storage write notice:', err);
+export async function savePhoto(key: string, fileOrDataUrl: string | File | Blob): Promise<string> {
+  if (typeof window === 'undefined') {
+    return typeof fileOrDataUrl === 'string' ? fileOrDataUrl : '';
   }
 
-  // Persist image file to server disk (/public/uploads/) & /public/data/site-data.json
+  let publicUrl = typeof fileOrDataUrl === 'string' ? fileOrDataUrl : '';
+
   try {
-    const res = await fetch('/api/upload-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, imageData: urlOrBase64 }),
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.url) {
-        const latest = getStoredPhotos();
-        latest[key] = json.url;
-        localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(latest));
-        window.dispatchEvent(new CustomEvent(EVENT_NAME));
-        return json.url;
+    let uploadBody: File | Blob | null = null;
+    let ext = 'webp';
+    let contentType = 'image/webp';
+
+    if (fileOrDataUrl instanceof File || fileOrDataUrl instanceof Blob) {
+      uploadBody = fileOrDataUrl;
+      contentType = fileOrDataUrl.type || 'image/jpeg';
+      ext = contentType.split('/')[1] || 'jpg';
+      if (ext === 'jpeg') ext = 'jpg';
+    } else if (typeof fileOrDataUrl === 'string' && fileOrDataUrl.startsWith('data:image/')) {
+      const converted = dataUrlToBlob(fileOrDataUrl);
+      uploadBody = converted.blob;
+      ext = converted.ext;
+      contentType = converted.mimeType;
+    }
+
+    // 1. If we have a binary image (File/Blob/Cropped DataURL), upload to Supabase Storage bucket "salon-images"
+    if (uploadBody) {
+      const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filePath = `${safeKey}-${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('salon-images')
+        .upload(filePath, uploadBody, {
+          contentType,
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.warn('Supabase Storage upload error:', uploadError.message);
+      } else {
+        const { data: urlData } = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
+
+        if (urlData?.publicUrl) {
+          publicUrl = urlData.publicUrl;
+        }
+      }
+    }
+
+    // 2. Save public URL with an upsert in Supabase table "site_images" (columns: id, url)
+    if (publicUrl) {
+      const { error: dbError } = await supabase
+        .from('site_images')
+        .upsert({ id: key, url: publicUrl }, { onConflict: 'id' });
+
+      if (dbError) {
+        console.warn('Supabase site_images upsert error:', dbError.message);
       }
     }
   } catch (err) {
-    console.warn('Disk image persistence notice:', err);
+    console.warn('Supabase image save error:', err);
   }
 
-  return urlOrBase64;
+  // 3. Update local state & cache immediately
+  const current = getStoredPhotos();
+  current[key] = publicUrl;
+  try {
+    localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(current));
+    window.dispatchEvent(new CustomEvent(EVENT_NAME));
+  } catch {
+    // ignore
+  }
+
+  return publicUrl;
 }
 
 /**
- * Resets a single photo to default both locally and on server disk
+ * Resets a single photo to default both locally and in Supabase table "site_images"
  */
-export function resetPhoto(key: string): void {
+export async function resetPhoto(key: string): Promise<void> {
   if (typeof window === 'undefined') return;
   const current = getStoredPhotos();
   if (DEFAULT_PHOTOS[key]) {
@@ -288,18 +330,20 @@ export function resetPhoto(key: string): void {
     } catch {
       // fallback
     }
-    fetch('/api/reset-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section: 'photos', key }),
-    }).catch(() => {});
+    try {
+      await supabase
+        .from('site_images')
+        .upsert({ id: key, url: DEFAULT_PHOTOS[key] }, { onConflict: 'id' });
+    } catch {
+      // ignore
+    }
   }
 }
 
 /**
- * Resets all photos to factory defaults both locally and on server disk
+ * Resets all photos to factory defaults both locally and in Supabase table "site_images"
  */
-export function resetAllPhotos(): void {
+export async function resetAllPhotos(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(STORAGE_KEYS.PHOTOS);
@@ -307,11 +351,12 @@ export function resetAllPhotos(): void {
   } catch {
     // ignore
   }
-  fetch('/api/reset-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ section: 'photos' }),
-  }).catch(() => {});
+  try {
+    const defaultRows = Object.entries(DEFAULT_PHOTOS).map(([id, url]) => ({ id, url }));
+    await supabase.from('site_images').upsert(defaultRows, { onConflict: 'id' });
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -336,9 +381,9 @@ export function getStoredNoveltyOffer(): NoveltyOfferData {
 }
 
 /**
- * Updates novelty offer data and persists to /public/data/site-data.json on disk
+ * Updates novelty offer data and persists in Supabase table "site_images" (id: '__config_novelty__')
  */
-export function saveNoveltyOffer(data: Partial<NoveltyOfferData>): void {
+export async function saveNoveltyOffer(data: Partial<NoveltyOfferData>): Promise<void> {
   if (typeof window === 'undefined') return;
   const current = getStoredNoveltyOffer();
   const updated: NoveltyOfferData = {
@@ -352,26 +397,19 @@ export function saveNoveltyOffer(data: Partial<NoveltyOfferData>): void {
     console.warn('Novelty storage write notice:', err);
   }
 
-  fetch('/api/site-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ novelty: updated }),
-  })
-    .then((r) => r.json())
-    .then((res) => {
-      if (res?.data?.novelty?.photo && res.data.novelty.photo !== updated.photo) {
-        const withDiskUrl = { ...updated, photo: res.data.novelty.photo };
-        localStorage.setItem(STORAGE_KEYS.NOVELTY, JSON.stringify(withDiskUrl));
-        window.dispatchEvent(new CustomEvent(EVENT_NAME));
-      }
-    })
-    .catch(() => {});
+  try {
+    await supabase
+      .from('site_images')
+      .upsert({ id: '__config_novelty__', url: JSON.stringify(updated) }, { onConflict: 'id' });
+  } catch {
+    // ignore
+  }
 }
 
 /**
- * Resets novelty offer to factory default both locally and on server disk
+ * Resets novelty offer to factory default
  */
-export function resetNoveltyOffer(): void {
+export async function resetNoveltyOffer(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(STORAGE_KEYS.NOVELTY);
@@ -379,11 +417,16 @@ export function resetNoveltyOffer(): void {
   } catch {
     // ignore
   }
-  fetch('/api/reset-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ section: 'novelty' }),
-  }).catch(() => {});
+  try {
+    await supabase
+      .from('site_images')
+      .upsert(
+        { id: '__config_novelty__', url: JSON.stringify(DEFAULT_NOVELTY_OFFER) },
+        { onConflict: 'id' }
+      );
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -404,7 +447,6 @@ export function getStoredPrestations(): Record<string, PrestationItem[]> {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return cloneDefaultPrestations();
 
-    // Ensure every default category exists in the returned object
     const merged: Record<string, PrestationItem[]> = cloneDefaultPrestations();
     for (const key of Object.keys(parsed)) {
       if (Array.isArray(parsed[key])) {
@@ -418,9 +460,9 @@ export function getStoredPrestations(): Record<string, PrestationItem[]> {
 }
 
 /**
- * Saves entire prestations map to storage AND writes to /public/data/site-data.json on disk
+ * Saves entire prestations map to storage AND persists in Supabase table "site_images" (id: '__config_prestations__')
  */
-export function savePrestations(data: Record<string, PrestationItem[]>): void {
+export async function savePrestations(data: Record<string, PrestationItem[]>): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEYS.PRESTATIONS, JSON.stringify(data));
@@ -429,11 +471,13 @@ export function savePrestations(data: Record<string, PrestationItem[]>): void {
     console.warn('Prestations storage write notice:', err);
   }
 
-  fetch('/api/site-data', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prestations: data }),
-  }).catch(() => {});
+  try {
+    await supabase
+      .from('site_images')
+      .upsert({ id: '__config_prestations__', url: JSON.stringify(data) }, { onConflict: 'id' });
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -490,24 +534,25 @@ export function movePrestationItem(categoryKey: string, itemId: string, directio
 }
 
 /**
- * Resets all prestations or a single category to factory defaults both locally and on disk
+ * Resets all prestations or a single category to factory defaults
  */
-export function resetPrestations(categoryKey?: string): void {
+export async function resetPrestations(categoryKey?: string): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
     if (!categoryKey) {
       localStorage.removeItem(STORAGE_KEYS.PRESTATIONS);
       window.dispatchEvent(new CustomEvent(EVENT_NAME));
-      fetch('/api/reset-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ section: 'prestations' }),
-      }).catch(() => {});
+      await supabase
+        .from('site_images')
+        .upsert(
+          { id: '__config_prestations__', url: JSON.stringify(DEFAULT_PRESTATIONS) },
+          { onConflict: 'id' }
+        );
     } else {
       const all = getStoredPrestations();
       const defaults = cloneDefaultPrestations();
       all[categoryKey] = defaults[categoryKey] || [];
-      savePrestations(all);
+      await savePrestations(all);
     }
   } catch {
     // ignore
@@ -515,40 +560,74 @@ export function resetPrestations(categoryKey?: string): void {
 }
 
 /**
- * Hydrates client storage from server disk (/public/data/site-data.json) on initial load
+ * Fetches image URLs (and site configs) from Supabase table "site_images" (columns: "id", "url")
+ * on page load to replace default images if they were modified.
  */
-let hasFetchedFromDisk = false;
-export async function syncFromDisk(): Promise<void> {
+let hasFetchedFromSupabase = false;
+export async function syncFromSupabase(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    const res = await fetch('/api/site-data', { cache: 'no-store' });
-    if (!res.ok) return;
-    const diskData = await res.json();
-    let changed = false;
-
-    if (diskData.photos && Object.keys(diskData.photos).length > 0) {
-      const mergedPhotos = { ...DEFAULT_PHOTOS, ...diskData.photos };
-      localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(mergedPhotos));
-      changed = true;
+    const { data, error } = await supabase.from('site_images').select('id, url');
+    if (error || !data || !Array.isArray(data)) {
+      if (error) console.warn('Supabase fetch site_images warning:', error.message);
+      return;
     }
 
-    if (diskData.novelty && Object.keys(diskData.novelty).length > 0) {
-      const mergedNovelty = { ...DEFAULT_NOVELTY_OFFER, ...diskData.novelty };
-      localStorage.setItem(STORAGE_KEYS.NOVELTY, JSON.stringify(mergedNovelty));
-      changed = true;
+    const currentPhotos = getStoredPhotos();
+    let photosUpdated = false;
+    let noveltyUpdated = false;
+    let prestationsUpdated = false;
+
+    for (const row of data) {
+      if (!row || !row.id || typeof row.url !== 'string') continue;
+
+      if (row.id === '__config_novelty__') {
+        try {
+          const parsedNovelty = JSON.parse(row.url);
+          localStorage.setItem(
+            STORAGE_KEYS.NOVELTY,
+            JSON.stringify({ ...DEFAULT_NOVELTY_OFFER, ...parsedNovelty })
+          );
+          noveltyUpdated = true;
+        } catch {
+          // ignore
+        }
+      } else if (row.id === '__config_prestations__') {
+        try {
+          const parsedPrestations = JSON.parse(row.url);
+          localStorage.setItem(
+            STORAGE_KEYS.PRESTATIONS,
+            JSON.stringify({ ...cloneDefaultPrestations(), ...parsedPrestations })
+          );
+          prestationsUpdated = true;
+        } catch {
+          // ignore
+        }
+      } else {
+        currentPhotos[row.id] = row.url;
+        photosUpdated = true;
+      }
     }
 
-    if (diskData.prestations && Object.keys(diskData.prestations).length > 0) {
-      const mergedPrestations = { ...cloneDefaultPrestations(), ...diskData.prestations };
-      localStorage.setItem(STORAGE_KEYS.PRESTATIONS, JSON.stringify(mergedPrestations));
-      changed = true;
+    if (photosUpdated) {
+      localStorage.setItem(STORAGE_KEYS.PHOTOS, JSON.stringify(currentPhotos));
+      // Also keep exclusiveOffer synced in novelty offer if present
+      if (currentPhotos.exclusiveOffer) {
+        const currentNov = getStoredNoveltyOffer();
+        if (currentNov.photo !== currentPhotos.exclusiveOffer) {
+          localStorage.setItem(
+            STORAGE_KEYS.NOVELTY,
+            JSON.stringify({ ...currentNov, photo: currentPhotos.exclusiveOffer })
+          );
+        }
+      }
     }
 
-    if (changed) {
+    if (photosUpdated || noveltyUpdated || prestationsUpdated) {
       window.dispatchEvent(new CustomEvent(EVENT_NAME));
     }
-  } catch {
-    // fallback to localStorage if offline
+  } catch (err) {
+    console.warn('Supabase sync notice:', err);
   }
 }
 
@@ -662,9 +741,9 @@ export function useSiteStore() {
   const [isAdmin, setIsAdmin] = useState<boolean>(isSessionAdmin);
 
   useEffect(() => {
-    if (!hasFetchedFromDisk) {
-      hasFetchedFromDisk = true;
-      syncFromDisk();
+    if (!hasFetchedFromSupabase) {
+      hasFetchedFromSupabase = true;
+      syncFromSupabase();
     }
 
     const handleUpdate = () => {
@@ -704,7 +783,8 @@ export function useSiteStore() {
     deletePrestationItem,
     movePrestationItem,
     resetPrestations,
-    syncFromDisk,
+    syncFromSupabase,
     logout: () => setSessionAdmin(false),
   };
 }
+
